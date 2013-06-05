@@ -13,6 +13,11 @@
 
 import os
 
+from pulp.client.commands.consumer.content import ConsumerContentCreateScheduleCommand as CreateSchedule
+from pulp.client.commands.consumer.content import ConsumerContentDeleteScheduleCommand as DeleteSchedule
+from pulp.client.commands.consumer.content import ConsumerContentListScheduleCommand as ListSchedule
+from pulp.client.commands.consumer.content import ConsumerContentNextRunCommand as NextRunSchedule
+from pulp.client.commands.consumer.content import ConsumerContentUpdateScheduleCommand as UpdateSchedule
 from pulp.client.commands.repo import cudl, sync_publish, upload
 from pulp.client.commands.repo.query import RepoSearchCommand
 from pulp.client.extensions.decorator import priority
@@ -27,6 +32,12 @@ from pulp_puppet.extensions.admin.repo import upload as puppet_upload
 from pulp_puppet.extensions.admin.repo.cudl import (CreatePuppetRepositoryCommand,
                                                     UpdatePuppetRepositoryCommand,
                                                     ListPuppetRepositoriesCommand)
+
+# constants --------------------------------------------------------------------
+
+INSTALL_ACTION = 'install'
+UNINSTALL_ACTION = 'uninstall'
+UPDATE_ACTION = 'update'
 
 
 @priority()
@@ -46,11 +57,35 @@ def initialize(context):
     consumer_install_section = structure.consumer_install_section(context.cli)
     consumer_install_section.add_command(content.InstallCommand(context))
 
+    consumer_install_schedules_section = structure.consumer_install_schedules_section(context.cli)
+    # Since there's no additional functionality necessary, just instantiate the generic methods here
+    consumer_install_schedules_section.add_command(CreateSchedule(context, action=INSTALL_ACTION))
+    consumer_install_schedules_section.add_command(DeleteSchedule(context, action=INSTALL_ACTION))
+    consumer_install_schedules_section.add_command(ListSchedule(context, action=INSTALL_ACTION))
+    consumer_install_schedules_section.add_command(NextRunSchedule(context, action=INSTALL_ACTION))
+    consumer_install_schedules_section.add_command(UpdateSchedule(context, action=INSTALL_ACTION))
+
     consumer_update_section = structure.consumer_update_section(context.cli)
     consumer_update_section.add_command(content.UpdateCommand(context))
 
+    consumer_update_schedules_section = structure.consumer_update_schedules_section(context.cli)
+    # Since there's no additional functionality necessary, just instantiate the generic methods here
+    consumer_update_schedules_section.add_command(CreateSchedule(context, action=UPDATE_ACTION))
+    consumer_update_schedules_section.add_command(DeleteSchedule(context, action=UPDATE_ACTION))
+    consumer_update_schedules_section.add_command(ListSchedule(context, action=UPDATE_ACTION))
+    consumer_update_schedules_section.add_command(NextRunSchedule(context, action=UPDATE_ACTION))
+    consumer_update_schedules_section.add_command(UpdateSchedule(context, action=UPDATE_ACTION))
+
     consumer_uninstall_section = structure.consumer_uninstall_section(context.cli)
     consumer_uninstall_section.add_command(content.UninstallCommand(context))
+
+    consumer_uninstall_schedules_section = structure.consumer_uninstall_schedules_section(context.cli)
+    # Since there's no additional functionality necessary, just instantiate the generic methods here
+    consumer_uninstall_schedules_section.add_command(CreateSchedule(context, action=UNINSTALL_ACTION))
+    consumer_uninstall_schedules_section.add_command(DeleteSchedule(context, action=UNINSTALL_ACTION))
+    consumer_uninstall_schedules_section.add_command(ListSchedule(context, action=UNINSTALL_ACTION))
+    consumer_uninstall_schedules_section.add_command(NextRunSchedule(context, action=UNINSTALL_ACTION))
+    consumer_uninstall_schedules_section.add_command(UpdateSchedule(context, action=UNINSTALL_ACTION))
 
     publish_section = structure.repo_publish_section(context.cli)
     publish_section.add_command(

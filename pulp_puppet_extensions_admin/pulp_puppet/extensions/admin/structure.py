@@ -29,8 +29,11 @@ SECTION_CONSUMER = 'consumer'
 SECTION_REPO = 'repo'
 
 SECTION_INSTALL = 'install'
+SECTION_INSTALL_SCHEDULES = 'schedules'
 SECTION_UPDATE = 'update'
+SECTION_UPDATE_SCHEDULES = 'schedules'
 SECTION_UNINSTALL = 'uninstall'
+SECTION_UNINSTALL_SCHEDULES = 'schedules'
 
 SECTION_UPLOADS = 'uploads'
 
@@ -44,8 +47,11 @@ DESC_CONSUMER = _('consumer commands')
 DESC_REPO = _('repository lifecycle commands')
 
 DESC_INSTALL = _('run or schedule a module install')
+DESC_INSTALL_SCHEDULES = _('manage consumer module install schedules')
 DESC_UPDATE = _('run or schedule a module update')
+DESC_UPDATE_SCHEDULES = _('manage consumer module update schedules')
 DESC_UNINSTALL = _('run or schedule a module uninstall')
+DESC_UNINSTALL_SCHEDULES = _('manage consumer module uninstall schedules')
 
 DESC_UPLOADS = _('upload modules into a repository')
 
@@ -86,6 +92,16 @@ def ensure_consumer_structure(cli):
     consumer_section.create_subsection(SECTION_INSTALL, DESC_INSTALL)
     consumer_section.create_subsection(SECTION_UPDATE, DESC_UPDATE)
     consumer_section.create_subsection(SECTION_UNINSTALL, DESC_UNINSTALL)
+
+    # Add subsections to the install, uninstall, and update sections
+    install_section = consumer_install_section(cli)
+    install_section.create_subsection(SECTION_INSTALL_SCHEDULES, DESC_INSTALL_SCHEDULES)
+
+    uninstall_section = consumer_uninstall_section(cli)
+    uninstall_section.create_subsection(SECTION_UNINSTALL_SCHEDULES, DESC_UNINSTALL_SCHEDULES)
+
+    update_section = consumer_update_section(cli)
+    update_section.create_subsection(SECTION_UPDATE_SCHEDULES, DESC_UPDATE_SCHEDULES)
 
     return consumer_section
 
@@ -139,12 +155,25 @@ def consumer_install_section(cli):
     return _find_section(cli, SECTION_ROOT, SECTION_CONSUMER, SECTION_INSTALL)
 
 
+def consumer_install_schedules_section(cli):
+    return _find_section(cli, SECTION_ROOT, SECTION_CONSUMER, SECTION_INSTALL, SECTION_INSTALL_SCHEDULES)
+
+
 def consumer_update_section(cli):
     return _find_section(cli, SECTION_ROOT, SECTION_CONSUMER, SECTION_UPDATE)
 
 
+def consumer_update_schedules_section(cli):
+    return _find_section(cli, SECTION_ROOT, SECTION_CONSUMER, SECTION_UPDATE, SECTION_UPDATE_SCHEDULES)
+
+
 def consumer_uninstall_section(cli):
     return _find_section(cli, SECTION_ROOT, SECTION_CONSUMER, SECTION_UNINSTALL)
+
+
+def consumer_uninstall_schedules_section(cli):
+    return _find_section(cli, SECTION_ROOT, SECTION_CONSUMER, SECTION_UNINSTALL,
+                         SECTION_UNINSTALL_SCHEDULES)
 
 
 def repo_section(cli):

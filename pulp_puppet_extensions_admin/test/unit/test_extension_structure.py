@@ -58,6 +58,24 @@ class StructureTests(base_cli.ExtensionTests):
         self.assertTrue(repo_section is not None)
         self.assertEqual(repo_section.name, structure.SECTION_REPO)
 
+    def test_ensure_consumer_structure_no_root(self):
+        # Test
+        repo_section = structure.ensure_consumer_structure(self.cli)
+
+        # Verify
+        self.assertTrue(repo_section is not None)
+        self.assertEqual(repo_section.name, structure.SECTION_CONSUMER)
+        puppet_root_section = self.cli.find_section(structure.SECTION_ROOT)
+        self.assertTrue(puppet_root_section is not None)
+
+    def test_ensure_consumer_structure_idempotency(self):
+        # Test
+        structure.ensure_consumer_structure(self.cli)
+        repo_section = structure.ensure_consumer_structure(self.cli)
+
+        # Verify
+        self.assertTrue(repo_section is not None)
+        self.assertEqual(repo_section.name, structure.SECTION_CONSUMER)
 
 class SectionRetrievalTests(base_cli.ExtensionTests):
 
@@ -74,13 +92,25 @@ class SectionRetrievalTests(base_cli.ExtensionTests):
         section = structure.consumer_install_section(self.cli)
         self.assertEqual(section.name, structure.SECTION_INSTALL)
 
+    def test_consumer_install_schedules_section(self):
+        section = structure.consumer_install_schedules_section(self.cli)
+        self.assertEqual(section.name, structure.SECTION_INSTALL_SCHEDULES)
+
     def test_consumer_update_section(self):
         section = structure.consumer_update_section(self.cli)
         self.assertEqual(section.name, structure.SECTION_UPDATE)
 
+    def test_consumer_update_schedules_section(self):
+        section = structure.consumer_update_schedules_section(self.cli)
+        self.assertEqual(section.name, structure.SECTION_UPDATE_SCHEDULES)
+
     def test_consumer_uninstall_section(self):
         section = structure.consumer_uninstall_section(self.cli)
         self.assertEqual(section.name, structure.SECTION_UNINSTALL)
+
+    def test_consumer_uninstall_schedules_section(self):
+        section = structure.consumer_uninstall_schedules_section(self.cli)
+        self.assertEqual(section.name, structure.SECTION_UNINSTALL_SCHEDULES)
 
     def test_repo_section(self):
         section = structure.repo_section(self.cli)
