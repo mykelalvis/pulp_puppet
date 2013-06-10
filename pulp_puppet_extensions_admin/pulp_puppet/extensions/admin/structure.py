@@ -47,11 +47,11 @@ DESC_CONSUMER = _('consumer commands')
 DESC_REPO = _('repository lifecycle commands')
 
 DESC_INSTALL = _('run or schedule a module install')
-DESC_INSTALL_SCHEDULES = _('manage consumer module install schedules')
+DESC_INSTALL_SCHEDULES = _('manage puppet module installation schedules')
 DESC_UPDATE = _('run or schedule a module update')
-DESC_UPDATE_SCHEDULES = _('manage consumer module update schedules')
+DESC_UPDATE_SCHEDULES = _('manage puppet module update schedules')
 DESC_UNINSTALL = _('run or schedule a module uninstall')
-DESC_UNINSTALL_SCHEDULES = _('manage consumer module uninstall schedules')
+DESC_UNINSTALL_SCHEDULES = _('manage puppet module uninstall schedules')
 
 DESC_UPLOADS = _('upload modules into a repository')
 
