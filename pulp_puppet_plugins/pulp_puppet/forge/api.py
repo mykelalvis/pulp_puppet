@@ -52,7 +52,6 @@ class Releases(object):
         command has hard-coded absolute paths, so we cannot put consumer or
         repository IDs in the URL's path.
         """
-        print 'AAAA'
         if resource_type is not None:
             if resource_type == self.REPO_RESOURCE:
                 credentials = ('.', resource)

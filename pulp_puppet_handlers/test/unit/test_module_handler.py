@@ -21,6 +21,18 @@ from pulp_puppet.common import constants
 from pulp_puppet.handlers.puppet import ModuleHandler
 
 
+def mock_puppet_pre33(f):
+    return mock.patch.object(ModuleHandler, '_detect_puppet_version',
+                             spec_set=ModuleHandler._detect_puppet_version,
+                             return_value = (3, 1, 0))(f)
+
+
+def mock_puppet_post33(f):
+    return mock.patch.object(ModuleHandler, '_detect_puppet_version',
+                             spec_set=ModuleHandler._detect_puppet_version,
+                             return_value = (3, 3, 0))(f)
+
+
 class ModuleHandlerTest(unittest.TestCase):
     def setUp(self):
         self.handler = ModuleHandler({})
@@ -31,17 +43,33 @@ class ModuleHandlerTest(unittest.TestCase):
         }
 
 class TestGenerateForgeURL(ModuleHandlerTest):
-    def test_with_repo_id(self):
+    @mock_puppet_pre33
+    def test_with_repo_id_pre33(self, mock_detect):
         host = 'localhost'
         result = self.handler._generate_forge_url(self.conduit, host, 'repo1')
 
         self.assertEqual(result, 'http://.:repo1@%s' % host)
 
-    def test_without_repo_id(self):
+    @mock_puppet_pre33
+    def test_without_repo_id_pre33(self, mock_detect):
         host = 'localhost'
         result = self.handler._generate_forge_url(self.conduit, host)
 
         self.assertEqual(result, 'http://consumer1:.@%s' % host)
+
+    @mock_puppet_post33
+    def test_with_repo_id_post33(self, mock_detect):
+        host = 'localhost'
+        result = self.handler._generate_forge_url(self.conduit, host, 'repo1')
+
+        self.assertEqual(result, 'http://%s/pulp_puppet/forge/repository/repo1' % host)
+
+    @mock_puppet_post33
+    def test_without_repo_id_post33(self, mock_detect):
+        host = 'localhost'
+        result = self.handler._generate_forge_url(self.conduit, host)
+
+        self.assertEqual(result, 'http://%s/pulp_puppet/forge/consumer/consumer1' % host)
 
 
 class TestInstall(ModuleHandlerTest):
