@@ -64,11 +64,11 @@ at one FQDN.
 
 ``http_dir``
  Full path to the directory where HTTP-published repositories should be created.
- Defaults to ``/var/www/pulp_puppet/http/repos``.
+ Defaults to ``/var/lib/pulp/published/puppet/http/repos``.
 
 ``https_dir``
  Full path to the directory where HTTPS-published repositories should be created.
- Defaults to ``/var/www/pulp_puppet/https/repos``.
+ Defaults to ``/var/lib/pulp/published/puppet/https/repos``.
 
 ``serve_http``
  Boolean indicating if the repository should be served over HTTP. Defaults to ``True``.
@@ -76,6 +76,8 @@ at one FQDN.
 ``serve_https``
  Boolean indicating if the repository should be served over HTTPS. Defaults to ``False``.
 
+
+.. _install-distributor:
 
 Install Distributor
 -------------------
@@ -88,15 +90,33 @@ the contents of a repository to exactly be the collection of modules installed
 in a puppet environment. This allows you to use Pulp's repository management
 features to manage which modules are installed in puppet.
 
-This distributor starts by deleting every directory it finds in the
-``install_path``, and then it extracts each module in the repository to that
-directory.
+This distributor performs these operations in the following order:
+ 1. Creates a temporary directory in the parent directory of ``install_path``.
+ 2. Extracts each module in the repository to that temporary directory.
+ 3. Deletes every directory it finds in the ``install_path``.
+ 4. Moves the content of temporary directory into the ``install_path``.
+ 5. Removes the temporary directory.
+
+When this distributor gets removed from a repository, such as when the repository
+gets deleted, all directories found in ``install_path`` will be deleted.
 
 .. warning:: This distributor deletes all directories found in the ``install_path``!
 
 ``install_path``
- Full path to the directory where modules should be installed. It is the user's
- responsibility to ensure that Pulp can write to this directory.
+ This is a full path to the directory where modules should be installed. It is the user's
+ responsibility to ensure that Pulp can write to this directory. The web server user (for example,
+ ``apache``) must be granted filesystem permissions to write to this path and the parent directory.
+ Additionally, the system SELinux policy must permit Pulp to write to this directory. Pulp's SELinux
+ policy includes a ``pulp_manage_puppet`` boolean that allows Pulp to write to paths that have the
+ ``puppet_etc_t`` label. You must ensure that the ``install_path`` and its parent directory have this
+ label applied to it. This boolean is disabled by default for safety. If you wish to enable it, you
+ can do this::
+
+    $ sudo semanage boolean --modify --on pulp_manage_puppet
+
+ ``/etc/puppet/`` has the ``puppet_etc_t`` label by default, so if you use this or a sub directory of
+ it as your ``install_path`` and you enable the ``pulp_manage_puppet`` boolean, SELinux will allow
+ Pulp to write to that path.
 
 File Distributor
 -------------------
@@ -111,4 +131,4 @@ id.  The base URL path where all Puppet repositories are published is ``/pulp/pu
 
 ``https_files_dir``
  Full path to the directory where HTTPS published file repositories will be created.
- Defaults to ``/var/www/pulp_puppet/files``.
+ Defaults to ``/var/lib/pulp/published/puppet/files``.

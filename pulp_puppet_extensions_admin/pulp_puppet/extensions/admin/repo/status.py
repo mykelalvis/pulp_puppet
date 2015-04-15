@@ -21,6 +21,7 @@ from pulp_puppet.common import constants
 from pulp_puppet.common.publish_progress import  PublishProgressReport
 from pulp_puppet.common.sync_progress import SyncProgressReport
 
+
 class PuppetStatusRenderer(StatusRenderer):
 
     def __init__(self, context):
@@ -56,8 +57,6 @@ class PuppetStatusRenderer(StatusRenderer):
             self._display_publish_modules_step(publish_report)
             self._display_publish_metadata_step(publish_report)
             self._display_publish_http_https_step(publish_report)
-
-    # -- private --------------------------------------------------------------
 
     def _display_sync_metadata_step(self, sync_report):
 
@@ -271,15 +270,17 @@ class PuppetStatusRenderer(StatusRenderer):
 
             self.prompt.render_failure_message(_('Could not import the following modules:'))
 
-            for module_name in individual_errors.keys()[:display_error_count]:
-                self.prompt.write(module_name, color=COLOR_FAILURE)
+            for module_error in individual_errors[:display_error_count]:
+                msg = _('    %(module)s: %(error)s')
+                msg = msg % {'module': module_error['module'], 'error': module_error['exception']}
+                self.prompt.write(msg, color=COLOR_FAILURE)
 
             self.prompt.render_spacer()
 
     def _render_error(self, error_message, exception, traceback):
         msg = _('The following error was encountered during the previous '
-                'step. More information can be found in %(log)s')
-        self.prompt.render_failure_message(msg % {'log' : self.context.config['logging']['filename']})
+                'step. More information can be found by passing -v flag one or more times')
+        self.prompt.render_failure_message(msg)
         self.prompt.render_spacer()
         self.prompt.render_failure_message('  %s' % error_message)
 

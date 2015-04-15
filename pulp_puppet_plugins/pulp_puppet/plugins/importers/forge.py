@@ -1,16 +1,3 @@
-# -*- coding: utf-8 -*-
-#
-# Copyright © 2012 Red Hat, Inc.
-#
-# This software is licensed to you under the GNU General Public
-# License as published by the Free Software Foundation; either version
-# 2 of the License (GPLv2) or (at your option) any later version.
-# There is NO WARRANTY for this software, express or implied,
-# including the implied warranties of MERCHANTABILITY,
-# NON-INFRINGEMENT, or FITNESS FOR A PARTICULAR PURPOSE. You should
-# have received a copy of GPLv2 along with this software; if not, see
-# http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt.
-
 from datetime import datetime
 from gettext import gettext as _
 import logging
@@ -19,18 +6,18 @@ import shutil
 import sys
 
 from pulp.common.util import encode_unicode
-from pulp.plugins.conduits.mixins import UnitAssociationCriteria
+from pulp.server.db.model.criteria import UnitAssociationCriteria
 
 from pulp_puppet.common import constants
-from pulp_puppet.common.constants import (STATE_FAILED, STATE_RUNNING, STATE_SUCCESS)
+from pulp_puppet.common.constants import (STATE_FAILED, STATE_RUNNING,
+                                          STATE_SUCCESS, STATE_CANCELED)
 from pulp_puppet.common.model import RepositoryMetadata, Module
 from pulp_puppet.common.sync_progress import SyncProgressReport
-from pulp_puppet.plugins.importers import metadata
+from pulp_puppet.plugins.importers import metadata as metadata_module
 from pulp_puppet.plugins.importers.downloaders import factory as downloader_factory
 
-_LOG = logging.getLogger(__name__)
 
-# -- public classes -----------------------------------------------------------
+_logger = logging.getLogger(__name__)
 
 
 class SynchronizeWithPuppetForge(object):
@@ -46,6 +33,10 @@ class SynchronizeWithPuppetForge(object):
 
         self.progress_report = SyncProgressReport(sync_conduit)
         self.downloader = None
+        # Since SynchronizeWithPuppetForge creats a Nectar downloader for each unit, we cannot
+        # rely on telling the current downloader to cancel. Therefore, we need another state tracker
+        # to check in the download units loop.
+        self._canceled = False
 
     def __call__(self):
         """
@@ -59,14 +50,14 @@ class SynchronizeWithPuppetForge(object):
         completed.
 
         :return: the report object to return to Pulp from the sync call
-        :rtype:  pulp.plugins.model.SyncReport
+        :rtype:  SyncProgressReport
         """
-        _LOG.info('Beginning sync for repository <%s>' % self.repo.id)
+        _logger.info('Beginning sync for repository <%s>' % self.repo.id)
 
         # quit now if there is no feed URL defined
         if not self.config.get(constants.CONFIG_FEED):
             self.progress_report.metadata_state = STATE_FAILED
-            self.progress_report.metadata_error_message =_(
+            self.progress_report.metadata_error_message = _(
                 'Cannot perform repository sync on a repository with no feed')
             self.progress_report.update_progress()
             return self.progress_report.build_final_report()
@@ -82,17 +73,16 @@ class SynchronizeWithPuppetForge(object):
             # One final progress update before finishing
             self.progress_report.update_progress()
 
-            report = self.progress_report.build_final_report()
-            return report
+            return self.progress_report
 
     def cancel(self):
         """
         Cancel an in-progress sync, if there is one.
         """
-        downloader = self.downloader
-        if downloader is None:
+        self._canceled = True
+        if self.downloader is None:
             return
-        downloader.cancel()
+        self.downloader.cancel()
 
     def _parse_metadata(self):
         """
@@ -107,7 +97,7 @@ class SynchronizeWithPuppetForge(object):
         :return: object representation of the metadata
         :rtype:  RepositoryMetadata
         """
-        _LOG.info('Beginning metadata retrieval for repository <%s>' % self.repo.id)
+        _logger.info('Beginning metadata retrieval for repository <%s>' % self.repo.id)
 
         self.progress_report.metadata_state = STATE_RUNNING
         self.progress_report.update_progress()
@@ -121,7 +111,11 @@ class SynchronizeWithPuppetForge(object):
             metadata_json_docs = downloader.retrieve_metadata(self.progress_report)
 
         except Exception, e:
-            _LOG.exception('Exception while retrieving metadata for repository <%s>' % self.repo.id)
+            if self._canceled:
+                _logger.warn('Exception occurred on canceled metadata download: %s' % e)
+                self.progress_report.metadata_state = STATE_CANCELED
+                return None
+            _logger.exception('Exception while retrieving metadata for repository <%s>' % self.repo.id)
             self.progress_report.metadata_state = STATE_FAILED
             self.progress_report.metadata_error_message = _('Error downloading metadata')
             self.progress_report.metadata_exception = e
@@ -144,7 +138,7 @@ class SynchronizeWithPuppetForge(object):
             for doc in metadata_json_docs:
                 metadata.update_from_json(doc)
         except Exception, e:
-            _LOG.exception('Exception parsing metadata for repository <%s>' % self.repo.id)
+            _logger.exception('Exception parsing metadata for repository <%s>' % self.repo.id)
             self.progress_report.metadata_state = STATE_FAILED
             self.progress_report.metadata_error_message = _('Error parsing repository modules metadata document')
             self.progress_report.metadata_exception = e
@@ -181,7 +175,7 @@ class SynchronizeWithPuppetForge(object):
                containing the modules to import
         :type  metadata: RepositoryMetadata
         """
-        _LOG.info('Retrieving modules for repository <%s>' % self.repo.id)
+        _logger.info('Retrieving modules for repository <%s>' % self.repo.id)
 
         self.progress_report.modules_state = STATE_RUNNING
 
@@ -196,7 +190,7 @@ class SynchronizeWithPuppetForge(object):
         try:
             self._do_import_modules(metadata)
         except Exception, e:
-            _LOG.exception('Exception importing modules for repository <%s>' % self.repo.id)
+            _logger.exception('Exception importing modules for repository <%s>' % self.repo.id)
             self.progress_report.modules_state = STATE_FAILED
             self.progress_report.modules_error_message = _('Error retrieving modules')
             self.progress_report.modules_exception = e
@@ -261,6 +255,8 @@ class SynchronizeWithPuppetForge(object):
 
         # Add new units
         for key in new_unit_keys:
+            if self._canceled:
+                break
             module = modules_by_key[key]
             try:
                 self._add_new_module(downloader, module)
@@ -295,7 +291,7 @@ class SynchronizeWithPuppetForge(object):
         # Initialize the unit in Pulp
         type_id = constants.TYPE_PUPPET_MODULE
         unit_key = module.unit_key()
-        unit_metadata = {} # populated later but needed for the init call
+        unit_metadata = {}  # populated later but needed for the init call
         relative_path = constants.STORAGE_MODULE_RELATIVE_PATH % module.filename()
 
         unit = self.sync_conduit.init_unit(type_id, unit_key, unit_metadata,
@@ -310,7 +306,8 @@ class SynchronizeWithPuppetForge(object):
                 shutil.copy(downloaded_filename, unit.storage_path)
 
             # Extract the extra metadata into the module
-            metadata.extract_metadata(module, unit.storage_path, self.repo.working_dir)
+            metadata_json = metadata_module.extract_metadata(unit.storage_path, self.repo.working_dir, module)
+            module = Module.from_json(metadata_json)
 
             # Update the unit with the extracted metadata
             unit.metadata = module.unit_metadata()

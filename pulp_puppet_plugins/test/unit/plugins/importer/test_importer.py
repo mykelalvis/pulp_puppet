@@ -14,8 +14,10 @@
 import unittest
 
 from mock import Mock, patch
+from pulp.plugins.model import SyncReport
 
 from pulp_puppet.common import constants
+from pulp_puppet.common.sync_progress import SyncProgressReport
 from pulp_puppet.plugins.importers import importer
 from pulp_puppet.plugins.importers.importer import PuppetModuleImporter
 
@@ -30,13 +32,16 @@ class TestImporter(unittest.TestCase):
 
 class TestPuppetModuleImporter(unittest.TestCase):
 
-    @patch('pulp_puppet.plugins.importers.importer.SynchronizeWithDirectory')
-    def test_directory_synchronization(self, mock_class):
+    @patch('pulp_puppet.plugins.importers.importer.SynchronizeWithDirectory.__call__')
+    @patch('pulp_puppet.plugins.importers.importer.SynchronizeWithPuppetForge.__call__')
+    def test_directory_synchronization(self, forge_call, mock_call):
         conduit = Mock()
         repository = Mock()
         config = {constants.CONFIG_FEED: 'http://host/tmp/%s' % constants.MANIFEST_FILENAME}
-        mock_inst = Mock(return_value=1234)
-        mock_class.return_value = mock_inst
+        progress_report = SyncProgressReport(conduit)
+        progress_report.metadata_state = constants.STATE_SUCCESS
+        progress_report.modules_state = constants.STATE_SUCCESS
+        mock_call.return_value = progress_report
 
         # test
 
@@ -45,17 +50,26 @@ class TestPuppetModuleImporter(unittest.TestCase):
 
         # validation
 
-        mock_class.assert_called_with(conduit, config)
-        mock_inst.assert_called_with(repository)
-        self.assertEqual(report, mock_inst.return_value)
+        mock_call.assert_called_with(repository)
+        self.assertEquals(report, conduit.build_success_report.return_value)
+        self.assertFalse(forge_call.called)
 
-    @patch('pulp_puppet.plugins.importers.importer.SynchronizeWithPuppetForge')
-    def test_forge_synchronization(self, mock_class):
+    @patch('pulp_puppet.plugins.importers.importer.SynchronizeWithPuppetForge.__call__')
+    @patch('pulp_puppet.plugins.importers.importer.SynchronizeWithDirectory.__call__')
+    def test_forge_synchronization(self, failed_call, mock_call):
         conduit = Mock()
         repository = Mock()
         config = {constants.CONFIG_FEED: 'http://host/tmp/forge'}
-        mock_inst = Mock(return_value=1234)
-        mock_class.return_value = mock_inst
+
+        # directory synchronization failure needed so the importer
+        # will retry using the forge synchronization.
+        failed_report = SyncProgressReport(conduit)
+        failed_report.metadata_state = constants.STATE_FAILED
+        failed_call.return_value = failed_report
+
+        progress_report = SyncProgressReport(conduit)
+        progress_report.metadata_state = constants.STATE_FAILED
+        mock_call.return_value = progress_report
 
         # test
 
@@ -63,10 +77,9 @@ class TestPuppetModuleImporter(unittest.TestCase):
         report = plugin.sync_repo(repository, conduit, config)
 
         # validation
+        mock_call.assert_called_with()
+        self.assertEquals(report, conduit.build_failure_report.return_value)
 
-        mock_class.assert_called_with(repository, conduit, config)
-        mock_inst.assert_called_with()
-        mock_class.return_value = mock_inst
 
     @patch('pulp_puppet.plugins.importers.upload.handle_uploaded_unit')
     def testUploadUnit(self, mock_handle_upload):

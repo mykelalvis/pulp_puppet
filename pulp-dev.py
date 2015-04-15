@@ -1,30 +1,24 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-#
-# Copyright © 2010 Red Hat, Inc.
-#
-# This software is licensed to you under the GNU General Public
-# License as published by the Free Software Foundation; either version
-# 2 of the License (GPLv2) or (at your option) any later version.
-# There is NO WARRANTY for this software, express or implied,
-# including the implied warranties of MERCHANTABILITY,
-# NON-INFRINGEMENT, or FITNESS FOR A PARTICULAR PURPOSE. You should
-# have received a copy of GPLv2 along with this software; if not, see
-# http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt.
 
 import optparse
 import os
 import shutil
 import sys
 
+from pulp.devel import environment
+
+
 WARNING_COLOR = '\033[31m'
 WARNING_RESET = '\033[0m'
 
 DIRS = (
-    '/var/www/pulp_puppet/http/repos',
-    '/var/www/pulp_puppet/https/repos',
-    '/var/www/pulp_puppet/files',
+    '/var/lib/pulp/published/puppet/http/repos',
+    '/var/lib/pulp/published/puppet/https/repos',
+    '/var/lib/pulp/published/puppet/files',
 )
+
+ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
 
 #
 # Str entry assumes same src and dst relative path.
@@ -38,7 +32,9 @@ DIR_PLUGINS = '/usr/lib/pulp/plugins'
 LINKS = (
     ('pulp_puppet_plugins/etc/httpd/conf.d/pulp_puppet.conf', '/etc/httpd/conf.d/pulp_puppet.conf'),
     ('pulp_puppet_plugins/etc/pulp/vhosts80/puppet.conf', '/etc/pulp/vhosts80/puppet.conf'),
-    ('pulp_puppet_plugins/srv/pulp/puppet_forge_api.wsgi', '/srv/pulp/puppet_forge_api.wsgi'),
+    ('pulp_puppet_plugins/srv/pulp/puppet_forge_pre33_api.wsgi', '/srv/pulp/puppet_forge_pre33_api.wsgi'),
+    ('pulp_puppet_plugins/srv/pulp/puppet_forge_post33_api.wsgi', '/srv/pulp/puppet_forge_post33_api.wsgi'),
+    ('pulp_puppet_plugins/srv/pulp/puppet_forge_post36_api.wsgi', '/srv/pulp/puppet_forge_post36_api.wsgi'),
     # Puppet Support Plugins
     ('pulp_puppet_plugins/pulp_puppet/plugins/types/puppet.json', DIR_PLUGINS + '/types/puppet.json'),
     # Puppet Support Admin Extensions
@@ -112,6 +108,9 @@ def getlinks():
 
 
 def install(opts):
+    # Install the packages in developer mode
+    environment.manage_setup_pys('install', ROOT_DIR)
+
     warnings = []
     create_dirs(opts)
     currdir = os.path.abspath(os.path.dirname(__file__))
@@ -119,8 +118,6 @@ def install(opts):
         warning_msg = create_link(opts, os.path.join(currdir,src), dst)
         if warning_msg:
             warnings.append(warning_msg)
-
-    os.system('chown -R apache:apache /var/www/pulp_puppet')
 
     if warnings:
         print "\n***\nPossible problems:  Please read below\n***"
@@ -136,6 +133,9 @@ def uninstall(opts):
             debug(opts, '%s does not exist, skipping' % dst)
             continue
         os.unlink(dst)
+
+    # Uninstall the packages
+    environment.manage_setup_pys('uninstall', ROOT_DIR)
 
     return os.EX_OK
 

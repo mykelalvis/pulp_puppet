@@ -11,7 +11,10 @@
 # have received a copy of GPLv2 along with this software; if not, see
 # http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt.
 
+from gettext import gettext as _
 import logging
+import urlparse
+import os
 import subprocess
 
 from pulp.agent.lib import handler
@@ -25,8 +28,30 @@ logger = logging.getLogger(__name__)
 
 
 class ModuleHandler(handler.ContentHandler):
-    @staticmethod
-    def _generate_forge_url(conduit, host, repo_id=None):
+    VERSION_ARGS = ('puppet', '--version')
+
+    @classmethod
+    def _detect_puppet_version(cls):
+        """
+        Detects and returns the version of puppet current available by running
+        "puppet --version".
+
+        :return:    version of puppet currently available, as a tuple of int
+        :rtype:     tuple
+        """
+        try:
+            popen = subprocess.Popen(cls.VERSION_ARGS, stdout=subprocess.PIPE)
+        except OSError:
+            logger.error(_('"puppet module" tool not found'))
+            raise
+
+        stdout, stderr = popen.communicate()
+
+        # turns "3.4.2\n" into (3, 4, 2)
+        return tuple(map(int, stdout.strip().split('.')))
+
+    @classmethod
+    def _generate_forge_url(cls, conduit, host, repo_id=None):
         """
         Generate a URL for the forge to use, and encode consumer ID or repo ID
         as appropriate with basic auth credentials.
@@ -38,14 +63,28 @@ class ModuleHandler(handler.ContentHandler):
         :return: URL
         :rtype:  str
         """
-        if repo_id:
-            username = constants.FORGE_NULL_AUTH_VALUE
-        else:
-            username = conduit.consumer_id
-        password = repo_id or constants.FORGE_NULL_AUTH_VALUE
+        # the "puppet module" tool does not seem to support HTTPS, unfortunately.
+        # although v3.4 might, if given a trusted cert on the server
+        if cls._detect_puppet_version() < (3, 3):
+            # puppet < 3.3 does not honor the path component of a URL, so we must
+            # do this basic auth silliness
+            logger.debug(_('detected puppet version less than 3.3'))
+            if repo_id:
+                username = constants.FORGE_NULL_AUTH_VALUE
+            else:
+                username = conduit.consumer_id
+            password = repo_id or constants.FORGE_NULL_AUTH_VALUE
 
-        # the "puppet module" tool does not seem to support HTTPS, unfortunately
-        return 'http://%s:%s@%s' % (username, password, host)
+            return 'http://%s:%s@%s' % (username, password, host)
+        else:
+            # puppet 3.3+ honors the path component, so we can embed the repo
+            # or consumer id there
+            logger.debug(_('detected puppet version 3.3 or greater'))
+            if repo_id:
+                path = os.path.join(constants.FORGE_PATH_REPO, repo_id)
+            else:
+                path = os.path.join(constants.FORGE_PATH_CONSUMER, conduit.consumer_id)
+            return urlparse.urlunparse(('http', host, path, '', '', ''))
 
     @classmethod
     def install(cls, conduit, units, options):
@@ -68,8 +107,10 @@ class ModuleHandler(handler.ContentHandler):
         """
         host = options[constants.FORGE_HOST]
         repo_id = options.get(constants.REPO_ID_OPTION)
+        skip_dep = options.get(constants.SKIP_DEP_OPTION)
+        module_path = options.get(constants.MODULEPATH_OPTION)
         successes, errors, num_changes = cls._perform_operation(
-            'install', units, cls._generate_forge_url(conduit, host, repo_id))
+            'install', units, cls._generate_forge_url(conduit, host, repo_id), skip_dep, module_path)
         report = ContentReport()
         report.set_succeeded({'successes': successes, 'errors': errors}, num_changes)
         return report
@@ -94,8 +135,10 @@ class ModuleHandler(handler.ContentHandler):
         """
         host = options[constants.FORGE_HOST]
         repo_id = options.get(constants.REPO_ID_OPTION)
+        skip_dep = options.get(constants.SKIP_DEP_OPTION)
+        module_path = options.get(constants.MODULEPATH_OPTION)
         successes, errors, num_changes = cls._perform_operation(
-            'upgrade', units, cls._generate_forge_url(conduit, host, repo_id))
+            'upgrade', units, cls._generate_forge_url(conduit, host, repo_id), skip_dep, module_path)
         report = ContentReport()
         report.set_succeeded({'successes': successes, 'errors': errors}, num_changes)
         return report
@@ -120,8 +163,9 @@ class ModuleHandler(handler.ContentHandler):
                     tool indicated an error. Everything else is in "successes".
         :rtype:     pulp.agent.lib.report.ContentReport
         """
+        module_path = options.get(constants.MODULEPATH_OPTION)
         previous_failure_count = 0
-        successes, errors, num_changes = cls._perform_operation('uninstall', units)
+        successes, errors, num_changes = cls._perform_operation('uninstall', units, None, None, module_path)
 
         # need this so we can easily access original unit objects when constructing
         # new requests below
@@ -140,7 +184,8 @@ class ModuleHandler(handler.ContentHandler):
                 previous_failure_count = len(failed_names)
                 failed_units = [units_by_full_name[full_name] for full_name in failed_names]
                 # retry the failed attempts
-                new_successes, new_errors, new_num_changes = cls._perform_operation('uninstall', failed_units)
+                new_successes, new_errors, new_num_changes = \
+                    cls._perform_operation('uninstall', failed_units, None, None, module_path)
                 num_changes += new_num_changes
                 # move new successes from "errors" to "successes"
                 successes.update(new_successes)
@@ -167,7 +212,7 @@ class ModuleHandler(handler.ContentHandler):
         raise NotImplementedError()
 
     @classmethod
-    def _perform_operation(cls, operation, units, forge_url=None):
+    def _perform_operation(cls, operation, units, forge_url=None, skip_dep=None, module_path=None):
         """
         For a list of units, attempt to perform the given operation. Separates
         results for each individual unit into "successes" and "errors". An error
@@ -182,6 +227,10 @@ class ModuleHandler(handler.ContentHandler):
         :param forge_url:   optional URL for a forge. By default, the "puppet
                             module" tool uses the official Puppet Forge.
         :type  forge_url:   str
+        :param skip_dep:    If True, skip installation of module dependencies
+        :type  skip_dep:    boolean
+        :param module_path: option to manually specify which directory to install into
+        :type  module_path: str
         :return:    three-member tuple of successes, errors, and num_changes.
                     "successes" is a dict where keys are full package names and
                     values are dicts that come from the JSON output of the "puppet
@@ -206,6 +255,10 @@ class ModuleHandler(handler.ContentHandler):
             if unit.get('version'):
                 args.extend(['--version', unit['version']])
             args.append(full_name)
+            if skip_dep:
+                args.extend(['--ignore-dependencies'])
+            if module_path:
+                args.extend(['--modulepath', module_path])
 
             # execute the command
             try:

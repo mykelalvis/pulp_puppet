@@ -1,0 +1,8 @@
+======================
+Pulp 2.6 Release Notes
+======================
+
+Pulp 2.6.0
+==========
+
+You can see the :fixedbugs:`2.6.0`.

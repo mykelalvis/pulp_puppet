@@ -1,16 +1,3 @@
-# -*- coding: utf-8 -*-
-#
-# Copyright © 2013 Red Hat, Inc.
-#
-# This software is licensed to you under the GNU General Public
-# License as published by the Free Software Foundation; either version
-# 2 of the License (GPLv2) or (at your option) any later version.
-# There is NO WARRANTY for this software, express or implied,
-# including the implied warranties of MERCHANTABILITY,
-# NON-INFRINGEMENT, or FITNESS FOR A PARTICULAR PURPOSE. You should
-# have received a copy of GPLv2 along with this software; if not, see
-# http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt.
-
 from cStringIO import StringIO
 import os
 import tarfile
@@ -20,6 +7,7 @@ import shutil
 import errno
 
 import mock
+from pulp.devel.unit.util import touch
 from pulp.plugins.conduits.repo_publish import RepoPublishConduit
 from pulp.plugins.config import PluginCallConfiguration
 from pulp.plugins.model import Repository, AssociatedUnit, PublishReport
@@ -58,23 +46,6 @@ class TestValidateConfig(unittest.TestCase):
         self.assertFalse(result)
         self.assertTrue(len(message) > 0)
 
-    def test_path_is_not_dir(self):
-        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: __file__})
-
-        result, message = self.distributor.validate_config(self.repo, config, [])
-
-        self.assertFalse(result)
-        self.assertTrue(len(message) > 0)
-
-    def test_without_permission(self):
-        # you're not running your tests as root, RIGHT?
-        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: '/root'})
-
-        result, message = self.distributor.validate_config(self.repo, config, [])
-
-        self.assertFalse(result)
-        self.assertTrue(len(message) > 0)
-
     def test_with_permission(self):
         config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: '/tmp'})
 
@@ -86,6 +57,9 @@ class TestValidateConfig(unittest.TestCase):
 class TestPublishRepo(unittest.TestCase):
     def setUp(self):
         self.distributor = installdistributor.PuppetModuleInstallDistributor()
+        self.working_directory = tempfile.mkdtemp()
+        self.puppet_dir = os.path.join(self.working_directory, 'puppet')
+        os.makedirs(self.puppet_dir)
         self.repo = Repository('repo1', '', {})
         self.conduit = RepoPublishConduit('repo1', self.distributor.metadata()['id'])
         self.uk1 = {'author': 'puppetlabs', 'name': 'stdlib', 'version': '1.2.0'}
@@ -96,19 +70,32 @@ class TestPublishRepo(unittest.TestCase):
         ]
         self.conduit.get_units = mock.MagicMock(return_value=self.units, spec_set=self.conduit.get_units)
 
-    @mock.patch('shutil.move', autospec=True)
+    def tearDown(self):
+        shutil.rmtree(self.working_directory)
+
+
+    @mock.patch.object(installdistributor.PuppetModuleInstallDistributor,
+                       '_ensure_destination_dir',
+                       return_value=None)
+    @mock.patch.object(installdistributor.PuppetModuleInstallDistributor,
+                       '_move_to_destination_directory',
+                       return_value=None)
+    @mock.patch.object(installdistributor.PuppetModuleInstallDistributor,
+                       '_rename_directory',
+                       return_value=None)
     @mock.patch('tarfile.open', autospec=True)
     @mock.patch.object(installdistributor.PuppetModuleInstallDistributor,
                        '_clear_destination_directory',
                        return_value=None)
     @mock.patch.object(installdistributor.PuppetModuleInstallDistributor,
-                       '_create_destination_directory',
+                       '_create_temporary_destination_directory',
                        return_value=None)
     @mock.patch.object(installdistributor.PuppetModuleInstallDistributor,
                        '_check_for_unsafe_archive_paths',
                        return_value=None)
-    def test_workflow(self, mock_check_paths, mock_mkdir, mock_clear, mock_open, mock_move):
-        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: '/tmp'})
+    def test_workflow(self, mock_check_paths, mock_mkdir, mock_clear, mock_open, mock_rename,
+                      mock_move, mock_ensure_destination):
+        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: self.puppet_dir})
         mock_open.return_value.getnames.return_value = ['a/b', 'a/c']
 
         report = self.distributor.publish_repo(self.repo, self.conduit, config)
@@ -124,13 +111,15 @@ class TestPublishRepo(unittest.TestCase):
         mock_open.assert_any_call(self.units[0].storage_path)
         mock_open.assert_any_call(self.units[1].storage_path)
 
-        mock_mkdir.assert_called_once_with('/tmp')
-        mock_clear.assert_called_once_with('/tmp')
+        self.assertEqual(mock_rename.call_count, 2)
 
-        mock_check_paths.assert_called_once_with(self.units, '/tmp')
+        mock_mkdir.assert_called_once_with(self.puppet_dir)
+        mock_clear.assert_called_once_with(self.puppet_dir)
+        mock_ensure_destination.assert_called_once_with(self.puppet_dir)
+        mock_check_paths.assert_called_once_with(self.units, self.puppet_dir)
 
-        self.assertEqual(mock_move.call_count, 2)
-        mock_move.assert_any_call('/tmp/a', '/tmp/%s' % self.uk1['name'])
+        self.assertEqual(mock_move.call_count, 1)
+
 
     def test_no_destination(self):
         """this one should fail very early since the destination is missing"""
@@ -144,7 +133,7 @@ class TestPublishRepo(unittest.TestCase):
         self.assertEqual(len(report.details['success_unit_keys']), 0)
 
     def test_duplicate_unit_names(self):
-        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: '/tmp'})
+        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: self.puppet_dir})
         uk3 = {'author': 'puppetlabs', 'name': 'stdlib', 'version': '1.3.1'}
         unit3 = AssociatedUnit(constants.TYPE_PUPPET_MODULE, uk3, {}, '/a/b/z', '', '', '', '')
         self.units.append(unit3)
@@ -160,7 +149,7 @@ class TestPublishRepo(unittest.TestCase):
                        '_check_for_unsafe_archive_paths',
                        return_value=None)
     def test_unsafe_paths(self, mock_check):
-        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: '/tmp'})
+        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: self.puppet_dir})
         mock_check.side_effect = self._add_error
 
         report = self.distributor.publish_repo(self.repo, self.conduit, config)
@@ -177,14 +166,14 @@ class TestPublishRepo(unittest.TestCase):
     @mock.patch.object(installdistributor.PuppetModuleInstallDistributor,
                        '_clear_destination_directory',
                        side_effect=OSError)
-    def test_cannot_clear_destination(self, mock_clear, mock_check):
-        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: '/tmp'})
+    def test_cannot_remove_destination(self, mock_clear, mock_check):
+        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: self.puppet_dir})
 
         report = self.distributor.publish_repo(self.repo, self.conduit, config)
 
         self.assertFalse(report.success_flag)
         self.assertTrue(isinstance(report.summary, basestring))
-        self.assertEqual(len(report.details['errors']), 0)
+        self.assertEqual(len(report.details['errors']), 2)
         self.assertEqual(len(report.details['success_unit_keys']), 0)
 
     @mock.patch.object(installdistributor.PuppetModuleInstallDistributor,
@@ -198,7 +187,7 @@ class TestPublishRepo(unittest.TestCase):
         This is easy to simulate, because we can let the real tarfile module try
         to open the fake paths.
         """
-        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: '/tmp'})
+        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: self.puppet_dir})
 
         report = self.distributor.publish_repo(self.repo, self.conduit, config)
 
@@ -217,7 +206,7 @@ class TestPublishRepo(unittest.TestCase):
                        '_clear_destination_directory',
                        return_value=None)
     def test_cannot_extract_tarballs(self, mock_clear, mock_check, mock_open):
-        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: '/tmp'})
+        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: self.puppet_dir})
         mock_open.return_value.extractall.side_effect = OSError
 
         report = self.distributor.publish_repo(self.repo, self.conduit, config)
@@ -238,7 +227,7 @@ class TestPublishRepo(unittest.TestCase):
                        '_clear_destination_directory',
                        return_value=None)
     def test_cannot_move(self, mock_clear, mock_check, mock_open, mock_move):
-        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: '/tmp'})
+        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: self.puppet_dir})
         mock_open.return_value.getnames.return_value = ['a/b', 'a/c']
 
         report = self.distributor.publish_repo(self.repo, self.conduit, config)
@@ -258,7 +247,7 @@ class TestPublishRepo(unittest.TestCase):
                        '_clear_destination_directory',
                        return_value=None)
     def test_multiple_extraction_dirs(self, mock_clear, mock_check, mock_open):
-        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: '/tmp'})
+        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: self.puppet_dir})
         mock_open.return_value.getnames.return_value = ['a/b', 'c/b']
 
         report = self.distributor.publish_repo(self.repo, self.conduit, config)
@@ -274,7 +263,7 @@ class TestPublishRepo(unittest.TestCase):
                        '_clear_destination_directory',
                        return_value=None)
     def test_no_units(self, mock_clear):
-        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: '/tmp'})
+        config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: self.puppet_dir})
         self.conduit.get_units.return_value = []
 
         report = self.distributor.publish_repo(self.repo, self.conduit, config)
@@ -284,7 +273,7 @@ class TestPublishRepo(unittest.TestCase):
         self.assertEqual(len(report.details['success_unit_keys']), 0)
 
         # we still need to clear the destination
-        mock_clear.assert_called_once_with('/tmp')
+        mock_clear.assert_called_once_with(self.puppet_dir)
 
     def _add_error(self, *args, **kwargs):
         """
@@ -317,6 +306,41 @@ class TestFindDuplicateNames(unittest.TestCase):
         ret = self.method(self.units)
         self.assertTrue(self.units[0] in ret)
         self.assertTrue(self.units[2] in ret)
+
+
+class TestMoveToDestinationDirectory(unittest.TestCase):
+    def setUp(self):
+        self.working_dir = tempfile.mkdtemp()
+        self.destination_dir = os.path.join(self.working_dir, 'target')
+        os.makedirs(self.destination_dir)
+        self.source_dir = os.path.join(self.working_dir, 'source')
+        os.makedirs(self.source_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.working_dir)
+
+    def existing_files_saved(self):
+        existing_file = os.path.join(self.destination_dir, 'foo.txt')
+        touch(existing_file)
+        new_dir = os.path.join(self.source_dir, 'bar')
+        os.makedirs(new_dir)
+        installdistributor.PuppetModuleInstallDistributor.\
+            _move_to_destination_directory(self.source_dir, self.destination_dir)
+
+        self.assertTrue(os.path.exists(existing_file))
+
+    def test_source_dir_removed(self):
+        installdistributor.PuppetModuleInstallDistributor.\
+            _move_to_destination_directory(self.source_dir, self.destination_dir)
+        self.assertFalse(os.path.exists(self.source_dir))
+
+    def test_move_dirs(self):
+        new_dir = os.path.join(self.source_dir, 'bar')
+        os.makedirs(new_dir)
+        installdistributor.PuppetModuleInstallDistributor.\
+            _move_to_destination_directory(self.source_dir, self.destination_dir)
+
+        self.assertTrue(os.path.exists(os.path.join(self.destination_dir, 'bar')))
 
 
 class TestRenameDirectory(unittest.TestCase):
@@ -357,6 +381,12 @@ class TestRenameDirectory(unittest.TestCase):
         self.method(self.unit, '/tmp', ['a'])
 
         mock_move.assert_called_once_with('/tmp/a', '/tmp/stdlib')
+
+    @mock.patch('shutil.move', autospec=True)
+    def test_same_dir(self, mock_move):
+        self.method(self.unit, '/tmp', ['stdlib'])
+
+        self.assertFalse(mock_move.called)
 
 
 class TestCheckForUnsafeArchivePaths(unittest.TestCase):
@@ -469,7 +499,7 @@ class TestClearDestinationDirectory(unittest.TestCase):
         mock_rmtree.assert_any_call(os.path.join(destination, 'unit'))
 
 
-class TestCreateDestinationDirectory(unittest.TestCase):
+class TestCreateTemporaryDestinationDirectory(unittest.TestCase):
 
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp()
@@ -480,21 +510,22 @@ class TestCreateDestinationDirectory(unittest.TestCase):
     def test_no_dir(self):
         destination = os.path.join(self.tmp_dir, 'puppet')
         distributor = installdistributor.PuppetModuleInstallDistributor()
-        distributor._create_destination_directory(destination)
-        self.assertTrue(os.path.isdir(destination))
+        destination_dir = distributor._create_temporary_destination_directory(destination)
+        self.assertTrue(os.path.isdir(destination_dir))
 
     def test_dir_already_exists(self):
         destination = os.path.join(self.tmp_dir, 'puppet')
         os.makedirs(destination)
         distributor = installdistributor.PuppetModuleInstallDistributor()
-        distributor._create_destination_directory(destination)
+        destination_dir = distributor._create_temporary_destination_directory(destination)
+        self.assertTrue(os.path.isdir(destination_dir))
         self.assertTrue(os.path.isdir(destination))
 
     @mock.patch('os.makedirs', side_effect=OSError(errno.EPERM))
     def test_dir_permission_denied(self, *unused):
         destination = os.path.join(self.tmp_dir, 'puppet')
         distributor = installdistributor.PuppetModuleInstallDistributor()
-        self.assertRaises(OSError, distributor._create_destination_directory, destination)
+        self.assertRaises(OSError, distributor._create_temporary_destination_directory, destination)
 
 
 class TestDetailReport(unittest.TestCase):
@@ -530,3 +561,35 @@ class TestDetailReport(unittest.TestCase):
 
     def test_report_is_dict(self):
         self.assertTrue(isinstance(self.report.report, dict))
+
+
+class TestEnsureDestinationDir(unittest.TestCase):
+    def setUp(self):
+        self.distributor = installdistributor.PuppetModuleInstallDistributor()
+
+    @mock.patch('pulp_puppet.plugins.distributors.installdistributor.mkdir')
+    def test_calls_mkdir(self, fake_mkdir):
+        # Ensure we are calling the platform util method properly
+        path = 'path-123'
+        self.distributor._ensure_destination_dir(path)
+        fake_mkdir.assert_called_once_with(path)
+
+
+class TestDistributorRemoved(unittest.TestCase):
+    def setUp(self):
+        self.distributor = installdistributor.PuppetModuleInstallDistributor()
+        self.repo = Repository('repo1', '', '')
+        self.path = '/a/b/c/'
+        self.config = PluginCallConfiguration({}, {constants.CONFIG_INSTALL_PATH: self.path})
+
+    def test_calls_clear_dest(self):
+        with mock.patch.object(self.distributor, '_clear_destination_directory') as mock_clear:
+            self.distributor.distributor_removed(self.repo, self.config)
+
+        mock_clear.assert_called_once_with(self.path)
+
+    def test_without_configured_path(self):
+        with mock.patch.object(self.distributor, '_clear_destination_directory') as mock_clear:
+            self.distributor.distributor_removed(self.repo, PluginCallConfiguration({}, {}))
+
+        self.assertEqual(mock_clear.call_count, 0)

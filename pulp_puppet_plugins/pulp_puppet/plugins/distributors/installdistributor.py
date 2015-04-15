@@ -16,10 +16,12 @@ import logging
 import os
 import shutil
 import tarfile
+import tempfile
 import errno
 
 from pulp.plugins.distributor import Distributor
 from pulp.server.db.model.criteria import UnitAssociationCriteria
+from pulp.plugins.util.misc import get_parent_directory, mkdir
 
 from pulp_puppet.common import constants
 
@@ -71,13 +73,6 @@ class PuppetModuleInstallDistributor(Distributor):
             return True, None
         if not os.path.isabs(path):
             return False, _('install path is not absolute')
-        if os.path.exists(path):
-            if not os.path.isdir(path):
-                return False, _('install path exists but is not a directory')
-            # we need X to get directory listings
-            if not os.access(path, os.R_OK|os.W_OK|os.X_OK):
-                return False, _('the current user does not have permission to read '
-                                'and write files in the destination directory')
         return True, None
 
     def publish_repo(self, repo, publish_conduit, config):
@@ -118,18 +113,11 @@ class PuppetModuleInstallDistributor(Distributor):
 
         # ensure the destination directory exists
         try:
-            self._create_destination_directory(destination)
+            self._ensure_destination_dir(destination)
+            temporarydestination = self._create_temporary_destination_directory(destination)
         except OSError, e:
             return publish_conduit.build_failure_report(
                 'failed to create destination directory: %s' % str(e),
-                self.detail_report.report)
-
-        # clear out pre-existing contents
-        try:
-            self._clear_destination_directory(destination)
-        except (IOError, OSError), e:
-            return publish_conduit.build_failure_report(
-                'failed to clear destination directory: %s' % str(e),
                 self.detail_report.report)
 
         # actually publish
@@ -137,19 +125,54 @@ class PuppetModuleInstallDistributor(Distributor):
             try:
                 archive = tarfile.open(unit.storage_path)
                 try:
-                    archive.extractall(destination)
-                    self._rename_directory(unit, destination, archive.getnames())
+                    archive.extractall(temporarydestination)
+                    self._rename_directory(unit, temporarydestination, archive.getnames())
                 finally:
                     archive.close()
                 self.detail_report.success(unit.unit_key)
             except (OSError, IOError, ValueError), e:
                 self.detail_report.error(unit.unit_key, str(e))
 
+        if self.detail_report.has_errors:
+            return publish_conduit.build_failure_report('failed publishing units',
+                                                        self.detail_report.report)
+
+        # remove old directory if exists
+        try:
+            self._clear_destination_directory(destination)
+        except (IOError, OSError), e:
+            return publish_conduit.build_failure_report(
+                'failed to clear destination directory: %s' % str(e),
+                self.detail_report.report)
+
+        # move the subdirs of the temporary dir to the destination dir
+        try:
+            self._move_to_destination_directory(temporarydestination, destination)
+        except (IOError, OSError), e:
+            return publish_conduit.build_failure_report(
+                'failed to move temporary destination to destination directory: %s' % str(e),
+                self.detail_report.report)
+
         # return some kind of report
         if self.detail_report.has_errors:
             return publish_conduit.build_failure_report('failed', self.detail_report.report)
         else:
             return publish_conduit.build_success_report('success', self.detail_report.report)
+
+    def distributor_removed(self, repo, config):
+        """
+        Removed installed modules from the environment this is configured to use.
+
+        :param repo:    metadata describing the repository
+        :type  repo:    pulp.plugins.model.Repository
+        :param config:  plugin configuration
+        :type  config:  pulp.plugins.config.PluginCallConfiguration
+        """
+        destination = config.get(constants.CONFIG_INSTALL_PATH)
+        if destination:
+            _LOGGER.info(_('removing installed modules from environment at %(directory)s' %
+                           {'directory': destination}))
+            self._clear_destination_directory(destination)
 
     @staticmethod
     def _find_duplicate_names(units):
@@ -206,9 +229,19 @@ class PuppetModuleInstallDistributor(Distributor):
         if len(dir_names) != 1:
             raise ValueError('too many directories extracted')
 
-        before = os.path.join(destination, dir_names.pop())
-        after = os.path.join(destination, unit.unit_key['name'])
-        shutil.move(before, after)
+        before = os.path.normpath(os.path.join(destination, dir_names.pop()))
+        after = os.path.normpath(os.path.join(destination, unit.unit_key['name']))
+        if before != after:
+            shutil.move(before, after)
+
+    def _ensure_destination_dir(self, destination):
+        """
+        Ensure that the directory specified by destination exists
+
+        :param destination: The full path to the directory to create
+        :type destination: str
+        """
+        mkdir(destination)
 
     def _check_for_unsafe_archive_paths(self, units, destination):
         """
@@ -273,23 +306,47 @@ class PuppetModuleInstallDistributor(Distributor):
                 shutil.rmtree(path)
 
     @staticmethod
-    def _create_destination_directory(destination, mode=0755):
+    def _create_temporary_destination_directory(destination, mode=0755):
         """
-        create the destination directory when it does not exist.
+        Create the temporary destination directory as a peer of the target destination.
+        This is so that the move is hopefully taking place on the same filesystem so it
+        will be as fast as possible.
 
         :param destination: absolute path to the destination where modules should
                             be installed
         :type  destination: str
         :param mode: the directory permissions
         :type  mode: int
+        :return: absolute path to temporary created directory
+        :rtype: str
         """
+        basedir = get_parent_directory(destination)
         try:
-            os.makedirs(destination, mode)
+            os.makedirs(basedir, mode)
         except OSError, e:
-            if e.errno == errno.EEXIST and os.path.isdir(destination):
+            if e.errno == errno.EEXIST and os.path.isdir(basedir):
                 pass  # ignored
             else:
                 raise e
+        return tempfile.mkdtemp(prefix='pulp', dir=basedir)
+
+    @staticmethod
+    def _move_to_destination_directory(source, destination):
+        """
+        move the subdirectories of a source directory to
+        a destination directory and then delete the source directory.
+
+        :param source: absolute path to where modules are installed
+        :type  source: str
+
+        :param destination: absolute path to where the modules should be copied to
+        :type  destination: str
+        """
+        for directory in os.listdir(source):
+            path = os.path.join(source, directory)
+            if os.path.isdir(path):
+                shutil.move(path, destination)
+        shutil.rmtree(source)
 
 
 class DetailReport(object):

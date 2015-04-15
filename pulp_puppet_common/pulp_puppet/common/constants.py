@@ -20,6 +20,8 @@ support plugins (importers, distributors, extensions).
 # -- ids ----------------------------------------------------------------------
 
 # ID used to refer to the puppet importer
+import os
+
 IMPORTER_TYPE_ID = 'puppet_importer'
 
 # ID used to refer to the puppet importer instance on a repository
@@ -85,6 +87,7 @@ STATE_RUNNING = 'running'
 STATE_SUCCESS = 'success'
 STATE_FAILED = 'failed'
 STATE_SKIPPED = 'skipped'
+STATE_CANCELED = 'canceled'
 
 COMPLETE_STATES = (STATE_SUCCESS, STATE_FAILED, STATE_SKIPPED)
 
@@ -113,15 +116,15 @@ DEFAULT_SERVE_HTTPS = False
 
 # Local directory the web server will serve for HTTP repositories
 CONFIG_HTTP_DIR = 'http_dir'
-DEFAULT_HTTP_DIR = '/var/www/pulp_puppet/http/repos'
+DEFAULT_HTTP_DIR = '/var/lib/pulp/published/puppet/http/repos'
 
 # Local directory the web server will serve for HTTPS repositories
 CONFIG_HTTPS_DIR = 'https_dir'
-DEFAULT_HTTPS_DIR = '/var/www/pulp_puppet/https/repos'
+DEFAULT_HTTPS_DIR = '/var/lib/pulp/published/puppet/https/repos'
 
 # Local directory the web server will serve flat directory representations of repositories
 CONFIG_FILE_HTTPS_DIR = 'https_files_dir'
-DEFAULT_FILE_HTTPS_DIR = '/var/www/pulp_puppet/files'
+DEFAULT_FILE_HTTPS_DIR = '/var/lib/pulp/published/puppet/files'
 
 # Default absolute path component of URL where repos are stored
 CONFIG_ABSOLUTE_PATH = 'absolute_path'
@@ -138,6 +141,13 @@ FORGE_HOST = 'host'
 # field should be considered null
 FORGE_NULL_AUTH_VALUE = '.'
 
+# for puppet 3.3+, the path to the forge API
+FORGE_PATH = 'pulp_puppet/forge'
+# path to use when identifying a specific repo to query
+FORGE_PATH_REPO = os.path.join(FORGE_PATH, 'repository')
+# path to use when identifying a consumer whose bindings should be considered
+FORGE_PATH_CONSUMER = os.path.join(FORGE_PATH, 'consumer')
+
 # -- REST API ----------------------------------------------------------------
 
 # Option key passed to an "install" consumer request with a repository ID
@@ -147,6 +157,14 @@ REPO_ID_OPTION = 'repo_id'
 # Option key passed to an "install" consumer request with a repository ID
 # as its value that should have its entire contents installed
 WHOLE_REPO_OPTION = 'whole_repo'
+
+# Option key passed to an "install" or "update" consumer request with a boolean
+# as its value that should be used for the request
+SKIP_DEP_OPTION = 'skip_dep'
+
+# Option key passed to an "install", "update" or uninstall consumer request with a modulepath 
+# as its value that should be used for the request
+MODULEPATH_OPTION = 'module_path'
 
 # -- directory synchronization  ----------------------------------------------
 

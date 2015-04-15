@@ -139,10 +139,6 @@ class RepositoryMetadataTests(unittest.TestCase):
 
 class ModuleTests(unittest.TestCase):
 
-    def test_from_dict(self):
-        # Setup
-        pass
-
     def test_update_from_json(self):
         # Setup
         module = Module('jdob-valid', '1.0.0', 'jdob')
@@ -162,6 +158,38 @@ class ModuleTests(unittest.TestCase):
 
         # Verify
         self.assert_valid_module(module)
+
+    def test_from_json(self):
+        # Setup
+        data = json.loads(VALID_MODULE_METADATA_JSON)
+
+        # Test
+        module = Module.from_json(data)
+
+        # Verify
+        self.assertEqual(module.name, "valid")
+        self.assertEqual(module.author, "jdob")
+
+        module.name = "jdob-valid" # rename the module to use the assert
+        self.assert_valid_module(module)
+
+    def test_from_json_old_name(self):
+        """
+        Test that the Module.from_json method handles the old naming style
+        """
+        # Setup
+        metadata = {
+            'name': 'oldauthor/oldmodule',
+            'version': '0.1.0',
+        }
+
+        # Test
+        module = Module.from_json(metadata)
+
+        # Verify
+        self.assertEqual(module.author, 'oldauthor')
+        self.assertEqual(module.name, 'oldmodule')
+        self.assertEqual(module.version, '0.1.0')
 
     def assert_valid_module(self, module):
         self.assertEqual(module.name, 'jdob-valid')

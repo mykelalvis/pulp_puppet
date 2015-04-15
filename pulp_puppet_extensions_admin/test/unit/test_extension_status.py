@@ -29,7 +29,7 @@ IMPORTER_REPORT = {
         'execution_time': 0,
         'total_count': 0,
         'traceback': None,
-        'individual_errors': None,
+        'individual_errors': [],
         'state': 'success',
         'error_count': 0,
         'error': None,
@@ -77,13 +77,12 @@ FULL_REPORT = {
     'puppet_distributor' : DISTRIBUTOR_REPORT,
 }
 
+
 class PuppetStatusRendererTests(base_cli.ExtensionTests):
 
     def setUp(self):
         super(PuppetStatusRendererTests, self).setUp()
         self.renderer = PuppetStatusRenderer(self.context)
-
-        self.config['logging'] = {'filename' : 'test-extension-status.log'}
 
         self.sync_report = SyncProgressReport.from_progress_dict(IMPORTER_REPORT)
         self.publish_report = PublishProgressReport.from_progress_dict(DISTRIBUTOR_REPORT)
@@ -311,12 +310,14 @@ class PuppetStatusRendererTests(base_cli.ExtensionTests):
             tb = sys.exc_info()[2]
         tb = traceback.extract_tb(tb)
 
-        individual_errors = {}
+        individual_errors = []
         for i in range(0, 10):
-            individual_errors['mod_%s' % i] = {
+            individual_errors.append({
+                'module': 'mod_%s' % i,
+                'author': 'some author',
                 'exception' : 'e_%s' % i,
                 'traceback' : tb,
-            }
+            })
 
         # Test
         self.renderer._render_module_errors(individual_errors)
@@ -329,7 +330,8 @@ class PuppetStatusRendererTests(base_cli.ExtensionTests):
         # it, and the blank line at the end
         printed_module_names = set(x.strip() for x in self.prompt.output.lines[2:-1])
         # verify that only module names were printed, and not tracebacks
-        self.assertEqual(printed_module_names, set(individual_errors.keys()))
+        self.assertEqual(printed_module_names,
+                         set(['%s: %s' % (e['module'], e['exception']) for e in individual_errors]))
 
     def test_display_report(self):
         # Test

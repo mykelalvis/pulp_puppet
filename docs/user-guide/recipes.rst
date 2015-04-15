@@ -69,8 +69,35 @@ Also point a browser to
 `http://localhost/pulp/puppet/forge/ <http://localhost/pulp/puppet/forge/>`_
 (adjust the host name as needed) to view the published repository.
 
-Installing With Puppet Client
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Install Modules
+---------------
+
+.. _install_post_33:
+
+Installing With Puppet Client 3.3+
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To install from a specific pulp repository, the forge URL is formed
+as ``http://<hostname>/pulp_puppet/forge/repository/<repository_id>``. To
+install as a consumer from any bound repository, the URL is formed
+as ``http://<hostname>/pulp_puppet/forge/consumer/<consumer_id>``.
+
+For example, to install module puppetlabs-stdlib from the repository "demo",
+run the following command.
+
+::
+
+  $ puppet module install --module_repository=http://localhost/pulp_puppet/forge/repository/demo puppetlabs-stdlib
+
+Or to install module puppetlabs-stdlib as the consumer "con1" from any repository
+to which that consumer is bound, run the following command.
+
+::
+
+  $ puppet module install --module_repository=http://localhost/pulp_puppet/forge/consumer/con1 puppetlabs-stdlib
+
+Installing With Puppet Client < 3.3
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 You might notice that this command does not work:
 
@@ -79,10 +106,10 @@ You might notice that this command does not work:
   $ puppet module install --module_repository http://localhost/pulp/puppet/forge author/name
 
 For technical reasons described in the note below, the ``puppet module install``
-tool ignores the part of the URL after the host name, which means we cannot put
-the repository ID in the URL. We have a work-around that will still allow you to
-use the ``puppet module install`` command with Pulp, and it involves the use of
-basic auth credentials as part of the URL.
+tool in versions prior to 3.3 ignores the part of the URL after the host name,
+which means we cannot put the repository ID in the URL. We have a work-around
+that will still allow you to use the ``puppet module install`` command with Pulp,
+and it involves the use of basic auth credentials as part of the URL.
 
 .. note:: Puppet Forge implements a web API that their client uses to obtain dependency
           data when installing a module. Unfortunately, their command line tool has
@@ -137,7 +164,7 @@ Note that the following command requires root privileges.
 
 ::
 
-    $ sudo pulp-consumer -u admin register --consumer-id=fred
+    $ sudo pulp-consumer register --consumer-id=fred
     Enter password:
     Consumer [fred] successfully registered
 
@@ -243,3 +270,121 @@ Uninstall requests merely uninstall the specified module.
     1 change was made
 
     Uninstall Succeeded
+
+
+Building and Importing Modules
+------------------------------
+
+Start by creating a working directory. The directory will be used for git cloning and for building
+puppet modules.  This directory will be the *feed* for our Pulp repository.  Use any directory you
+like so long as you have *write* and *execute* permissions.
+
+::
+
+ $ sudo mkdir -p /opt/puppet/modules
+ $ sudo chmod -R 777 /opt/puppet
+
+Next, create a new repository that specifies a feed URL for the directory that will be created in a
+subsequent step. Use any repo-id you like, as long as it is unique within Pulp.
+
+::
+
+  $ pulp-admin puppet repo create --repo-id=puppet-builds --feed=file:///opt/puppet/modules/
+  Successfully created repository [puppet-builds]
+
+Next, build the puppet modules from source. The ``pulp-puppet-module-builder`` tool is provided
+with Pulp puppet support to make this step easier. The tool uses the
+`puppet module <http://docs.puppetlabs.com/references/3.4.0/man/module.html>`_ tool to build
+modules.  It also supports basic `Git <http://git-scm.com>`_ repository operations such a cloning and
+the checkout of branches and tags to simplify the building and importing of pupppet modules from
+git repositories.
+
+.. see:: ``pulp-puppet-module-builder --help`` for usage and options.
+
+In this example, we will build the ``puppetlabs-xinitd`` module provided by the Puppet Labs git
+repository using ``pulp-puppet-module-builder``.
+
+::
+
+ $ cd /opt/puppet
+ $ pulp-puppet-module-builder --url=https://github.com/puppetlabs/puppetlabs-xinetd -o ../modules
+ cd /opt/puppet
+ git clone --recursive https://github.com/puppetlabs/puppetlabs-xinetd
+ cd puppetlabs-xinetd
+ git status
+ git remote show -n origin
+ git fetch
+ git fetch --tags
+ git pull
+ find . -name init.pp
+ puppet module build .
+ mkdir -p ../modules
+ cp ./pkg/puppetlabs-xinetd-1.2.0.tar.gz ../modules
+ cd ../modules
+ cd /opt/puppet/puppetlabs-xinetd
+ cd /opt/puppet
+
+Listing of ``/opt/puppet/modules``:
+
+::
+
+ -rw-rw-r-- 1 demo demo  101 Jan 29 09:46 PULP_MANIFEST
+ -rw-rw-r-- 1 demo demo 6127 Jan 29 09:46 puppetlabs-xinetd-1.2.0.tar.gz
+
+The content of PULP_MANIFEST:
+
+::
+
+ puppetlabs-xinetd-1.2.0.tar.gz,344bfa47dc88b17d91a8b4a32ab6b8cbc12346a59e9898fce29c235eab672958,6127
+
+Next synchronize the repository, which imports all of the modules into the local Pulp repository.
+When the directory containing the built modules is located on another host and served by http,
+the feed URL for the manifest may be ``http://`` instead of `file://`` in which case, the manifest
+and modules are downloaded into a temporary location.
+
+::
+
+  $ pulp-admin puppet repo sync run --repo-id=puppet-builds
+  +----------------------------------------------------------------------+
+                 Synchronizing Repository [puppet-builds]
+  +----------------------------------------------------------------------+
+
+  This command may be exited by pressing ctrl+c without affecting the actual
+  operation on the server.
+
+  Downloading metadata...
+  [==================================================] 100%
+  Metadata Query: 1/1 items
+  ... completed
+
+  Downloading new modules...
+  [==================================================] 100%
+  Module: 1/1 items
+  ... completed
+
+  Publishing modules...
+  [==================================================] 100%
+  Module: 1/1 items
+  ... completed
+
+  Generating repository metadata...
+  [\]
+  ... completed
+
+  Publishing repository over HTTP...
+  ... completed
+
+  Publishing repository over HTTPS...
+  ... skipped
+
+
+.. note::
+ The ``pulp-puppet-module-builder`` requires that module source layout conform to
+ Puppet Labs standard module
+ `layout <http://docs.puppetlabs.com/puppet/2.7/reference/modules_fundamentals.html#module-layout>`_
+
+
+
+
+
+

@@ -29,7 +29,9 @@ All Bugs
 --------
 
 You can see the complete list of over 100 bugs that were
-`fixed in Pulp 2.3.0 <https://bugzilla.redhat.com/buglist.cgi?bug_status=VERIFIED&classification=Community&list_id=1927252&product=Pulp&query_format=advanced&target_release=2.3.0>`_.
+`fixed in Pulp 2.3.0 <https://bugzilla.redhat.com/buglist.cgi?bug_status=VERIFIED
+&bug_status=RELEASE_PENDING&bug_status=CLOSED&classification=Community&component=
+puppet-support&list_id=3357735&product=Pulp&query_format=advanced&target_release=2.3.0>`_.
 
 
 Pulp 2.3.1

@@ -26,12 +26,18 @@ pip-log.txt
 #Mr Developer
 .mr.developer.cfg
 
+# Ninja
+*.nja
+
 # PyCharm
 .idea
 cover
 
 # Sphinx
-*/docs/*/_build
+docs/_build
+
+# Sublime
+.codeintel
 
 # Vim
 *.swp

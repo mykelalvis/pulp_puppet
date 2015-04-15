@@ -109,6 +109,34 @@ class Module(object):
 
         return cls.from_dict(unit_as_dict)
 
+    @classmethod
+    def from_json(cls, module_json):
+        """
+        Converts a module's metadata.json to a Module representation. This
+        method does not use the 'author' field of metadata.json. The author
+        is retrieved from the 'name' field, which is expected to be in the
+        format 'authorname-modulename' or 'authorname/modulename'.
+
+        :param module_json: dict with values from metadata.json
+        :type  module_json: dict
+
+        :return: object representation of the given module
+        :rtype:  Module
+        """
+        # The unique identifier fields are all required and should be present
+        try:
+            author, name = module_json.get('name').split("-", 1)
+        except ValueError:
+            # This is the old naming format, but Puppet still allows it
+            author, name = module_json.get('name').split("/", 1)
+
+        version = module_json.get('version')
+
+        module = cls(name, version, author)
+        module.update_from_dict(module_json)
+
+        return module
+
     @staticmethod
     def generate_unit_key(name, version, author):
         """

@@ -14,7 +14,6 @@
 import logging
 
 from gettext import gettext as _
-from urlparse import urlparse
 
 from pulp.plugins.importer import Importer
 from pulp.common.config import read_json_config
@@ -31,9 +30,7 @@ from pulp_puppet.plugins.importers.forge import SynchronizeWithPuppetForge
 # entry_point method.
 CONF_FILENAME = 'server/plugins.conf.d/%s.json' % constants.IMPORTER_TYPE_ID
 
-_LOG = logging.getLogger(__name__)
-
-# -- plugins ------------------------------------------------------------------
+_logger = logging.getLogger(__name__)
 
 
 def entry_point():
@@ -74,21 +71,19 @@ class PuppetModuleImporter(Importer):
         # method is used.  Otherwise, the puppet forge synchronization method is used.
 
         # synchronize with a directory
+        self.sync_method = SynchronizeWithDirectory(sync_conduit, config)
+        report = self.sync_method(repo)
 
-        feed_url = config.get(constants.CONFIG_FEED)
-        parsed_url = urlparse(feed_url)
-        if parsed_url.path.rsplit('/', 1)[-1].endswith(constants.MANIFEST_FILENAME):
-            self.sync_method = SynchronizeWithDirectory(sync_conduit, config)
-            report = self.sync_method(repo)
-            self.sync_method = None
-            return report
+        # When fetching the PULP_MANIFEST is not successful, it's assumed that the
+        # feed points to a puppet forge instance and the synchronization is retried
+        # using puppet forge method.
 
-        # synchronize with puppet forge
+        if report.metadata_state == constants.STATE_FAILED:
+            self.sync_method = SynchronizeWithPuppetForge(repo, sync_conduit, config)
+            report = self.sync_method()
 
-        self.sync_method = SynchronizeWithPuppetForge(repo, sync_conduit, config)
-        report = self.sync_method()
         self.sync_method = None
-        return report
+        return report.build_final_report()
 
     def import_units(self, source_repo, dest_repo, import_conduit, config, units=None):
         return copier.copy_units(import_conduit, units)
@@ -97,16 +92,18 @@ class PuppetModuleImporter(Importer):
         try:
             report = upload.handle_uploaded_unit(repo, type_id, unit_key, metadata, file_path, conduit)
         except Exception, e:
-            _LOG.exception(e)
+            _logger.exception(e)
             report = {'success_flag': False, 'summary': e.message, 'details': {}}
         return report
 
-    def cancel_sync_repo(self, call_request, call_report):
+    def cancel_sync_repo(self):
+        """
+        Cancel a running repository synchronization operation.
+        """
         self.sync_cancelled = True
-        sync_method = self.sync_method
-        if sync_method is None:
+        if self.sync_method is None:
             return
-        sync_method.cancel()
+        self.sync_method.cancel()
 
     def is_sync_cancelled(self):
         """

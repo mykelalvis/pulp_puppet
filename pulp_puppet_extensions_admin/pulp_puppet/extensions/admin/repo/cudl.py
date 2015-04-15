@@ -33,7 +33,7 @@ OPTION_QUERY = PulpCliOption('--query', DESC_QUERY, required=False, allow_multip
 
 DESC_QUERIES = _(
     'comma-separated list of queries to issue against the feed\'s modules.json '
-    'file to scope which modules are imported.'
+    'file to scope which modules are imported. ignored when feed is static files.'
 )
 OPTION_QUERIES = PulpCliOption(
     '--queries', DESC_QUERIES, required=False, allow_multiple=False,
@@ -41,7 +41,8 @@ OPTION_QUERIES = PulpCliOption(
 
 DESC_QUERIES_UPDATE = _(
     'comma-separated list of queries to issue against the feed\'s modules.json '
-    'file to scope which modules are imported. overwrites previous values.'
+    'file to scope which modules are imported. overwrites previous values. '
+    'ignored when feed is static files.'
 )
 OPTION_QUERIES_UPDATE = PulpCliOption(
     '--queries', DESC_QUERIES_UPDATE, required=False, allow_multiple=False,
@@ -94,7 +95,7 @@ class CreatePuppetRepositoryCommand(CreateRepositoryCommand, ImporterConfigMixin
         arg_utils.convert_boolean_arguments((constants.CONFIG_SERVE_HTTP, constants.CONFIG_SERVE_HTTPS), distributor_config)
 
         distributors = [
-            dict(distributor_type=constants.DISTRIBUTOR_TYPE_ID, distributor_config=distributor_config,
+            dict(distributor_type_id=constants.DISTRIBUTOR_TYPE_ID, distributor_config=distributor_config,
                  auto_publish=True, distributor_id=constants.DISTRIBUTOR_ID)
         ]
 
@@ -118,42 +119,36 @@ class UpdatePuppetRepositoryCommand(UpdateRepositoryCommand, ImporterConfigMixin
         self.add_option(OPTION_HTTPS)
 
     def run(self, **kwargs):
-        # -- repository metadata --
-        repo_id = kwargs.pop(options.OPTION_REPO_ID.keyword)
-        description = kwargs.pop(options.OPTION_DESCRIPTION.keyword, None)
-        name = kwargs.pop(options.OPTION_NAME.keyword, None)
-        notes = kwargs.pop(options.OPTION_NOTES.keyword, None)
-
         # -- importer metadata --
         queries = kwargs.pop(OPTION_QUERIES.keyword, None)
         if queries is None:
             queries = kwargs.pop(OPTION_QUERY.keyword, None)
         importer_config = self.parse_user_input(kwargs)
         importer_config.update({constants.CONFIG_QUERIES: queries})
-        arg_utils.convert_removed_options(importer_config)
+        if importer_config:
+            arg_utils.convert_removed_options(importer_config)
+            kwargs['importer_config'] = importer_config
+
+        # Remove the importer keys from kwargs so they don't get added to the repo config
+        for key in importer_config:
+            kwargs.pop(key, None)
 
         # -- distributor metadata --
         distributor_config = {
-            constants.CONFIG_SERVE_HTTP : kwargs.pop(OPTION_HTTP.keyword, None),
-            constants.CONFIG_SERVE_HTTPS : kwargs.pop(OPTION_HTTPS.keyword, None),
-            }
+            constants.CONFIG_SERVE_HTTP: kwargs.pop(OPTION_HTTP.keyword, None),
+            constants.CONFIG_SERVE_HTTPS: kwargs.pop(OPTION_HTTPS.keyword, None)
+        }
         arg_utils.convert_removed_options(distributor_config)
-        arg_utils.convert_boolean_arguments((constants.CONFIG_SERVE_HTTP, constants.CONFIG_SERVE_HTTPS), distributor_config)
+        arg_utils.convert_boolean_arguments((constants.CONFIG_SERVE_HTTP,
+                                             constants.CONFIG_SERVE_HTTPS), distributor_config)
+        # Remove the distributor keys from kwargs so they don't get added to the repo config
+        for key in distributor_config:
+            kwargs.pop(key, None)
 
-        distributor_configs = {constants.DISTRIBUTOR_ID : distributor_config}
-
-        # -- server update --
-        response = self.context.server.repo.update_repo_and_plugins(repo_id, name,
-            description, notes, importer_config, distributor_configs)
-
-        if not response.is_async():
-            msg = _('Repository [%(r)s] successfully updated')
-            self.context.prompt.render_success_message(msg % {'r' : repo_id})
-        else:
-            d = _('Repository update postponed due to another operation. Progress '
-                  'on this task can be viewed using the commands under "repo tasks".')
-            self.context.prompt.render_paragraph(d, tag='postponed')
-            self.context.prompt.render_reasons(response.response_body.reasons)
+        kwargs['distributor_configs'] = {}
+        if distributor_config:
+            kwargs['distributor_configs'][constants.DISTRIBUTOR_ID] = distributor_config
+        super(UpdatePuppetRepositoryCommand, self).run(**kwargs)
 
 
 class ListPuppetRepositoriesCommand(ListRepositoriesCommand):
